@@ -11,6 +11,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 22 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// ECDSASignatureHelper rechaza una firma cuyo r o s sea más ancho que el punto de la curva
+// (CVE-2026-43798; arreglo de Apple 31cdc3c, publicado en su 0.14.1).
+//
 
 import Crypto
 import Foundation
@@ -335,11 +340,18 @@ private struct ECDSASignatureHelper {
         UInt64
     ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) {
+    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) throws {
         precondition(MemoryLayout<ECDSASignatureHelper>.size >= pointSize, "Invalid width for ECDSA signature helper.")
 
         let rByteView = r.mpIntView
         let sByteView = s.mpIntView
+
+        // The r and s components are attacker-controlled and parsed pre-authentication. Neither may be
+        // wider than the curve's point size: a larger value produces a negative starting offset below and
+        // an out-of-bounds write into the stack storage.
+        guard rByteView.count <= pointSize, sByteView.count <= pointSize else {
+            throw NIOSSHError.invalidSSHMessage(reason: "ECDSA signature mpint exceeds curve point size")
+        }
 
         let rByteStartingOffset = pointSize - rByteView.count
         let sByteStartingOffset = pointSize - sByteView.count
@@ -357,7 +369,7 @@ private struct ECDSASignatureHelper {
     }
 
     static func toECDSASignature<Signature: ECDSASignatureProtocol>(r: ByteBuffer, s: ByteBuffer) throws -> Signature {
-        let helper = ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
+        let helper = try ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
         return try withUnsafeBytes(of: helper.storage) { storagePtr in
             try Signature(rawRepresentation: UnsafeRawBufferPointer(rebasing: storagePtr.prefix(Signature.pointSize * 2)))
         }
