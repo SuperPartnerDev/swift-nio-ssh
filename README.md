@@ -1,3 +1,15 @@
+# swift-nio-ssh (fork de SuperPartner)
+
+Este repositorio es la capa SSH de [sp-citadel](https://github.com/SuperPartnerDev/sp-citadel), el fork de Citadel que usa SP Mount. Nace el 22 de septiembre de 2026 del árbol `d88989f` (tag `0.3.7`) de `Wellz26/swift-nio-ssh`, que viene de `Joannis/swift-nio-ssh` y este del [swift-nio-ssh de Apple](https://github.com/apple/swift-nio-ssh), del que se separó en `b0591e4`. Existe para que nadie fuera de SuperPartner publique una versión de esta capa: `sp-citadel` la fija por versión exacta.
+
+Lo que cambia respecto a `d88989f`:
+
+- `Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift`: rechaza una firma ECDSA cuyo `r` o `s` sea más ancho que el punto de la curva (CVE-2026-43798, GHSA-998x-vgvp-xwpc; arreglo de Apple `31cdc3c`, publicado en su 0.14.1). Prueba: `Tests/NIOSSHTests/NIOSSHSignatureTests.swift`, tomada de Apple sin cambios.
+
+Licencia Apache 2.0, la de Apple (`LICENSE.txt`). Cada archivo modificado lo dice en su cabecera, como pide el artículo 4(b) de la licencia.
+
+---
+
 # SwiftNIO SSH
 
 This project contains SSH support using [SwiftNIO](https://github.com/apple/swift-nio).
