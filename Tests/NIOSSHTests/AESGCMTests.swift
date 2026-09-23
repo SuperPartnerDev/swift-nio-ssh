@@ -487,3 +487,19 @@ extension NIOSSHSessionKeys {
                           outboundMACKey: self.inboundMACKey)
     }
 }
+
+
+// Prueba del fork (SuperPartner, 23 sep 2026): encryptPacket reserva la cabecera escribiendo,
+// no moviendo el índice (misma raíz que F2 de la revisión del 22 sep 2026).
+extension AESGCMTests {
+    func testEncryptPacketIntoEmptyBufferReservesHeaderSpace() throws {
+        let initialKeys = self.generateKeys(keySize: .bits128)
+        let encryptor = try assertNoThrowWithValue(AES128GCMOpenSSHTransportProtection(initialKeys: initialKeys, mac: nil))
+
+        var empty = ByteBuffer()
+        XCTAssertEqual(empty.capacity, 0)
+        XCTAssertNoThrow(try encryptor.encryptPacket(NIOSSHEncryptablePayload(message: .newKeys), to: &empty, sequenceNumber: 0))
+        XCTAssertEqual(empty.readableBytes, 36)
+        XCTAssertEqual(empty.getInteger(at: 0, as: UInt32.self), 16)
+    }
+}

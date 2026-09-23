@@ -11,6 +11,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// la cabecera del paquete en claro se reserva escribiéndola (Apple #150, db57f32).
+//
 
 import NIOCore
 
@@ -60,8 +64,9 @@ struct SSHPacketSerializer {
             ///   byte[n2]  random padding; n2 = padding_length
             ///   byte[m]   mac (Message Authentication Code - MAC); m = mac_length
 
-            /// payload
-            buffer.moveWriterIndex(forwardBy: 5)
+            /// payload: los 5 bytes de cabecera se reservan escribiéndolos, no moviendo el
+            /// índice (Apple #150; F2 de la revisión del 22 sep 2026).
+            buffer.writeMultipleIntegers(UInt32(0), UInt8(0))
             let messageLength = buffer.writeSSHMessage(message)
 
             /// RFC 4253 § 6:

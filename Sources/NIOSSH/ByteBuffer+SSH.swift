@@ -11,6 +11,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// writeCompositeSSHString reserva el campo de longitud escribiéndolo (Apple #150, db57f32).
+//
 
 import NIOCore
 
@@ -203,9 +207,12 @@ extension ByteBuffer {
     /// wrap the body into this function, which will take the returned total length and use that as the string length.
     @discardableResult
     mutating func writeCompositeSSHString(_ compositeFunction: (inout ByteBuffer) throws -> Int) rethrows -> Int {
-        // Reserve 4 bytes for the length.
+        // Reserve 4 bytes for the length. Se reservan escribiendo, no moviendo el índice:
+        // mover el índice sin capacidad rompía la precondición de NIO, y el peer decide cuánto
+        // llena el buffer con su identificador de versión (Apple #150; F2 de la revisión del
+        // 22 sep 2026).
         let originalWriterIndex = self.writerIndex
-        self.moveWriterIndex(forwardBy: 4)
+        self.writeInteger(UInt32(0))
 
         var writtenLength: Int
         do {

@@ -368,3 +368,51 @@ private extension ByteBuffer {
         self.getBytes(at: self.readerIndex, length: self.readableBytes)!
     }
 }
+
+
+// Pruebas del fork (SuperPartner, 23 sep 2026): el espacio de las cabeceras se reserva
+// escribiendo, no moviendo el índice de escritura. Apple #150 (db57f32); F2 de la revisión
+// de seguridad del 22 sep 2026: un identificador de versión del peer de 993 bytes dejaba
+// initialExchangeBytes a 0 bytes de su capacidad y la siguiente cadena compuesta rompía
+// la precondición de NIO antes de verificar el host.
+extension ByteBufferSSHTests {
+    // La de Apple, sin cambios.
+    func testCompositeStringDoesTheRightThingWithBB() throws {
+        var buffer = ByteBuffer()
+        XCTAssertEqual(buffer.capacity, 0)
+
+        buffer.writeCompositeSSHString {
+            $0.writeInteger(UInt64(9))
+        }
+        let writtenBytes = buffer.readBytes(length: buffer.readableBytes)
+        XCTAssertEqual(
+            writtenBytes,
+            [0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 9]
+        )
+    }
+
+    // La geometría de F2: un buffer de 1024 bytes lleno hasta 1021, 1022, 1023 o 1024 bytes
+    // (V_C de 27 más V_S de 4 + 993) y después una cadena compuesta.
+    func testCompositeStringAtEveryCapacityBoundary() throws {
+        for fill in 1000 ... 1024 {
+            var buffer = ByteBufferAllocator().buffer(capacity: 1024)
+            buffer.writeRepeatingByte(UInt8(ascii: "V"), count: fill)
+            buffer.writeCompositeSSHString {
+                $0.writeInteger(UInt64(1))
+            }
+            XCTAssertEqual(buffer.readableBytes, fill + 4 + 8, "relleno \(fill)")
+        }
+    }
+
+    // El serializador en claro reserva los 5 bytes de cabecera de la misma forma.
+    func testSerializerReservesPacketHeaderSpace() throws {
+        for fill in 0 ... 64 {
+            var buffer = ByteBuffer()
+            buffer.writeRepeatingByte(UInt8(ascii: "X"), count: fill)
+            var serializer = SSHPacketSerializer()
+            XCTAssertNoThrow(try serializer.serialize(message: .version("SSH-2.0-prueba"), to: &buffer))
+            XCTAssertNoThrow(try serializer.serialize(message: .newKeys, to: &buffer))
+            XCTAssertGreaterThan(buffer.readableBytes, fill + 16, "relleno \(fill)")
+        }
+    }
+}

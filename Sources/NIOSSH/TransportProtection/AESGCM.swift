@@ -11,6 +11,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// encryptPacket reserva la cabecera escribiéndola (misma raíz que Apple #150).
+//
 
 import Crypto
 import Foundation
@@ -130,7 +134,9 @@ extension AESGCMTransportProtection: NIOSSHTransportProtection {
         let packetPaddingIndex = outboundBuffer.writerIndex + packetLengthLength
         let packetPaddingLength = MemoryLayout<UInt8>.size
 
-        outboundBuffer.moveWriterIndex(forwardBy: packetLengthLength + packetPaddingLength)
+        // Los 5 bytes de cabecera se reservan escribiéndolos, no moviendo el índice: mover el
+        // índice sin capacidad rompía la precondición de NIO (misma raíz que Apple #150).
+        outboundBuffer.writeMultipleIntegers(UInt32(0), UInt8(0))
 
         // First, we write the packet.
         let payloadBytes = outboundBuffer.writeEncryptablePayload(packet)
