@@ -195,3 +195,23 @@ private extension SSHEncryptedTrafficTests {
         }
     }
 }
+
+
+// Prueba del fork (SuperPartner, 23 sep 2026): F1 de la revisión del 22 sep 2026. Con AES-GCM
+// la longitud del paquete va en claro y sin autenticar; sumarle macBytes con el + de Swift
+// abortaba el proceso antes de la comprobación de maximumPacketSize. Es el guard que Apple
+// añadió en #244 (6d576c8).
+extension SSHEncryptedTrafficTests {
+    func testEncryptedPacketLengthNearUInt32MaxIsRejectedNotTrapped() {
+        self.protect(.aes128)
+
+        var attack = ByteBufferAllocator().buffer(capacity: 16)
+        attack.writeInteger(UInt32.max)
+        attack.writeRepeatingByte(0, count: 12)
+        self.parser.append(bytes: &attack)
+
+        XCTAssertThrowsError(try self.parser.nextPacket()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidEncryptedPacketLength)
+        }
+    }
+}

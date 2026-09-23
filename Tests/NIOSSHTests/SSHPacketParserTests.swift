@@ -223,3 +223,67 @@ public extension ByteBuffer {
         return buffer
     }
 }
+
+
+// Pruebas del fork (SuperPartner, 23 sep 2026): el identificador de versión del peer no pasa
+// de los 255 bytes de RFC 4253 §4.2, CR y LF incluidos (límite que Apple añadió en #244;
+// defensa en profundidad para F2 de la revisión del 22 sep 2026).
+extension SSHPacketParserTests {
+    private func feedVersionLine(to parser: inout SSHPacketParser, totalLength: Int, withCR: Bool) {
+        let ending = withCR ? "\r\n" : "\n"
+        var buffer = ByteBufferAllocator().buffer(capacity: totalLength)
+        buffer.writeString("SSH-")
+        buffer.writeRepeatingByte(UInt8(ascii: "A"), count: totalLength - 4 - ending.utf8.count)
+        buffer.writeString(ending)
+        parser.append(bytes: &buffer)
+    }
+
+    func testAcceptsVersionLineOf255Bytes() throws {
+        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        self.feedVersionLine(to: &parser, totalLength: 255, withCR: false)
+        switch try parser.nextPacket() {
+        case .version(let string):
+            XCTAssertTrue(string.hasPrefix("SSH-"))
+            XCTAssertEqual(string.utf8.count, 254)
+        default:
+            XCTFail("Se esperaba .version")
+        }
+    }
+
+    func testAcceptsVersionLineOf255BytesWithCRLF() throws {
+        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        self.feedVersionLine(to: &parser, totalLength: 255, withCR: true)
+        switch try parser.nextPacket() {
+        case .version(let string):
+            XCTAssertTrue(string.hasPrefix("SSH-"))
+            XCTAssertEqual(string.utf8.count, 253)
+        default:
+            XCTFail("Se esperaba .version")
+        }
+    }
+
+    func testRejectsVersionLineOf256Bytes() throws {
+        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        self.feedVersionLine(to: &parser, totalLength: 256, withCR: false)
+        XCTAssertThrowsError(try parser.nextPacket()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .excessiveVersionLength)
+        }
+    }
+
+    func testRejectsVersionLineOf256BytesWithCRLF() throws {
+        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        self.feedVersionLine(to: &parser, totalLength: 256, withCR: true)
+        XCTAssertThrowsError(try parser.nextPacket()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .excessiveVersionLength)
+        }
+    }
+
+    // El banner exacto del escenario de F2.
+    func testRejectsVersionLineOf993Bytes() throws {
+        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        self.feedVersionLine(to: &parser, totalLength: 993, withCR: true)
+        XCTAssertThrowsError(try parser.nextPacket()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .excessiveVersionLength)
+        }
+    }
+}

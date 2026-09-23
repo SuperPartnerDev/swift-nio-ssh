@@ -11,6 +11,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// decryptLength rechaza una longitud que desborde al sumar macBytes (F1; Apple #244) y
+// readVersion acota el identificador de versión a 255 bytes (RFC 4253 §4.2; Apple #244).
+//
 
 import NIOCore
 
@@ -128,6 +133,10 @@ struct SSHPacketParser {
     }
 
     internal static let maximumAllowedVersionSize = 4096
+
+    /// RFC 4253 §4.2: el identificador de versión ("SSH-...") no pasa de 255 bytes, CR y LF
+    /// incluidos. Las líneas de preámbulo siguen acotadas en total por maximumAllowedVersionSize.
+    internal static let maximumVersionLineLength = 255
     private mutating func readVersion() throws -> String? {
         // Looking for a complete SSH version string, potentially with pre-lines
         let slice = self.buffer.readableBytesView
@@ -151,6 +160,11 @@ struct SSHPacketParser {
                 
                 // Check if this line looks like an SSH version (any SSH version, not just 2.0)
                 if lineSlice.count >= 4 && lineSlice.starts(with: "SSH-".utf8) {
+                    // El identificador lo elige el peer: se acota a los 255 bytes del RFC (lineSlice
+                    // incluye el CR si lo hay; el +1 es el LF). Límite que Apple añadió en #244.
+                    guard lineSlice.count + 1 <= Self.maximumVersionLineLength else {
+                        throw NIOSSHError.excessiveVersionLength
+                    }
                     // Found SSH version line, return everything up to and including this line
                     var version = String(decoding: slice[slice.startIndex..<index], as: UTF8.self)
                     // read including \n
@@ -179,9 +193,13 @@ struct SSHPacketParser {
 
         // This force unwrap is safe because we must have a block size, and a block size is always going to be more than 4 bytes.
         let packetLength = self.buffer.getInteger(at: self.buffer.readerIndex, as: UInt32.self)!
-        let decryptedLength = packetLength + UInt32(protection.macBytes)
 
-        if decryptedLength >= self.maximumPacketSize {
+        // La longitud la manda el peer y, con AES-GCM, va en claro y sin autenticar: se suma sin
+        // abortar, porque el + de Swift mataba el proceso con 0xFFFFFFF0 o más antes de llegar
+        // a la comprobación de maximumPacketSize (F1 de la revisión del 22 sep 2026; el mismo
+        // guard que Apple añadió en #244).
+        let (decryptedLength, overflow) = packetLength.addingReportingOverflow(UInt32(protection.macBytes))
+        if overflow || decryptedLength >= self.maximumPacketSize {
             throw NIOSSHError.invalidEncryptedPacketLength
         }
 
