@@ -2,9 +2,19 @@
 
 Este repositorio es la capa SSH de [sp-citadel](https://github.com/SuperPartnerDev/sp-citadel), el fork de Citadel que usa SP Mount. Nace el 22 de septiembre de 2026 del árbol `d88989f` (tag `0.3.7`) de `Wellz26/swift-nio-ssh`, que viene de `Joannis/swift-nio-ssh` y este del [swift-nio-ssh de Apple](https://github.com/apple/swift-nio-ssh), del que se separó en `b0591e4`. Existe para que nadie fuera de SuperPartner publique una versión de esta capa: `sp-citadel` la fija por versión exacta.
 
-Lo que cambia respecto a `d88989f`:
+Lo que cambia respecto a `d88989f`, por versión:
+
+`0.3.7-sp.1` (22 sep 2026)
 
 - `Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift`: rechaza una firma ECDSA cuyo `r` o `s` sea más ancho que el punto de la curva (CVE-2026-43798, GHSA-998x-vgvp-xwpc; arreglo de Apple `31cdc3c`, publicado en su 0.14.1). Prueba: `Tests/NIOSSHTests/NIOSSHSignatureTests.swift`, tomada de Apple sin cambios.
+
+`0.3.7-sp.2` (23 sep 2026), hallazgos de la revisión de seguridad de SuperPartner del 22 sep 2026 sobre `a1b5db6`:
+
+- `ByteBuffer+SSH.swift`, `SSHPacketSerializer.swift` y `TransportProtection/AESGCM.swift`: las cabeceras se reservan escribiéndolas, no moviendo el índice de escritura (Apple #150, `db57f32`). Antes, un identificador de versión del peer de 993 bytes dejaba el buffer del intercambio de claves al borde de su capacidad y la siguiente escritura rompía la precondición de NIO, antes de verificar el host.
+- `SSHPacketParser.swift`: la longitud de un paquete cifrado se suma sin abortar y se comprueba antes de usarse (el `guard` de Apple #244; con AES-GCM va en claro y sin autenticar, y `0xFFFFFFFF` mataba el proceso), y el identificador de versión del peer se acota a los 255 bytes de RFC 4253 §4.2.
+- `Child Channels/SSHChildChannel.swift`: un `maximumPacketSize` de 0 anunciado por el peer se rechaza al abrir o confirmar el canal, en vez de meter la entrega de escrituras en un bucle sin fin; y un mensaje de canal que llega antes de la confirmación falla el canal en vez de abortar el proceso con un force-unwrap.
+
+Pruebas de cada uno en `Tests/NIOSSHTests` (`ByteBuffer+SSHTests`, `AESGCMTests`, `SSHPacketParserTests`, `SSHEncryptedTrafficTests`, `ChildChannelMultiplexerTests`), marcadas "Pruebas del fork".
 
 Licencia Apache 2.0, la de Apple (`LICENSE.txt`). Cada archivo modificado lo dice en su cabecera, como pide el artículo 4(b) de la licencia.
 
