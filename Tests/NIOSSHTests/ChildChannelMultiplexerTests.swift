@@ -1824,3 +1824,89 @@ extension ByteBuffer {
         ByteBuffer(repeating: 0, count: SSHPacketParser.defaultMaximumPacketSize + 1)
     }()
 }
+
+
+// Pruebas del fork (SuperPartner, 23 sep 2026): F3/F5 y F4 de la revisión del 22 sep 2026.
+extension ChildChannelMultiplexerTests {
+    private func outboundChannelAwaitingConfirmation(_ harness: TestHarness) -> (Channel, UInt32)? {
+        var childChannel: Channel?
+        harness.multiplexer.createChildChannel(channelType: .session) { channel, _ in
+            childChannel = channel
+            return channel.eventLoop.makeSucceededFuture(())
+        }
+        guard let channel = childChannel else {
+            XCTFail("No se creó el canal hijo")
+            return nil
+        }
+        XCTAssertFalse(channel.isActive)
+        guard let channelID = self.assertChannelOpen(harness.flushedMessages.first) else {
+            return nil
+        }
+        return (channel, channelID)
+    }
+
+    // F4: un mensaje de canal antes de CHANNEL_OPEN_CONFIRMATION hacía force-unwrap de un
+    // identificador remoto que todavía es nil y abortaba el proceso.
+    func testChannelMessageBeforeOpenConfirmationFailsTheChannelWithoutCrashing() throws {
+        var payload = ByteBufferAllocator().buffer(capacity: 4)
+        payload.writeString("hola")
+        let premature: [(String, (UInt32) -> SSHMessage)] = [
+            ("WINDOW_ADJUST", { self.windowAdjust(peerChannelID: $0, increment: 1) }),
+            ("DATA", { self.data(peerChannelID: $0, data: payload) }),
+            ("EOF", { self.eof(peerChannelID: $0) }),
+        ]
+
+        for (name, make) in premature {
+            let harness = self.harnessForbiddingInboundChannels()
+            defer { harness.finish() }
+            guard let (channel, channelID) = self.outboundChannelAwaitingConfirmation(harness) else { return }
+
+            var closeError: Error?
+            channel.closeFuture.whenFailure { closeError = $0 }
+
+            _ = try? harness.multiplexer.receiveMessage(make(channelID))
+            harness.eventLoop.run()
+
+            XCTAssertNotNil(closeError, "\(name): el canal debe fallar")
+            XCTAssertFalse(channel.isActive, name)
+            // Sin identificador remoto no hay CHANNEL_CLOSE que mandar: solo el CHANNEL_OPEN inicial.
+            XCTAssertEqual(harness.flushedMessages.count, 1, name)
+        }
+    }
+
+    // F3/F5: un peer que confirma el canal con maximumPacketSize 0 metía a deliverPendingWrites
+    // en un bucle sin fin que además crecía en memoria.
+    func testOpenConfirmationWithZeroMaximumPacketSizeFailsTheChannel() throws {
+        let harness = self.harnessForbiddingInboundChannels()
+        defer { harness.finish() }
+        guard let (channel, channelID) = self.outboundChannelAwaitingConfirmation(harness) else { return }
+
+        // Una escritura en cola: al activarse el canal se entregaría con tope 0.
+        var buffer = ByteBufferAllocator().buffer(capacity: 16)
+        buffer.writeString("SSH_FXP_INIT")
+        channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)), promise: nil)
+
+        var closeError: Error?
+        channel.closeFuture.whenFailure { closeError = $0 }
+
+        _ = try? harness.multiplexer.receiveMessage(self.openConfirmation(originalChannelID: channelID, peerChannelID: 1, initialWindowSize: 65536, maxPacketSize: 0))
+        harness.eventLoop.run()
+
+        XCTAssertNotNil(closeError)
+        XCTAssertFalse(channel.isActive)
+        // El peer ya tiene identificador: se le manda CHANNEL_CLOSE.
+        self.assertChannelClose(harness.flushedMessages.last, recipientChannel: 1)
+    }
+
+    // F3 del lado que recibe la apertura: un CHANNEL_OPEN con maximumPacketSize 0 se rechaza.
+    func testOpenRequestWithZeroMaximumPacketSizeIsRejected() throws {
+        let harness = self.harness { channel, _ in
+            channel.eventLoop.makeSucceededFuture(())
+        }
+        defer { harness.finish() }
+
+        XCTAssertNoThrow(try harness.multiplexer.receiveMessage(self.openRequest(channelID: 1, maxPacketSize: 0)))
+        harness.eventLoop.run()
+        self.assertChannelOpenFailure(harness.flushedMessages.first, recipientChannel: 1)
+    }
+}

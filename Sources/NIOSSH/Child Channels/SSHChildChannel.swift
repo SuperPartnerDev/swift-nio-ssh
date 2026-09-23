@@ -11,6 +11,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// errorEncountered no hace force-unwrap del identificador remoto (F4); un maximumPacketSize
+// de 0 del peer se rechaza al abrir o confirmar el canal y deliverPendingWrites no gira con
+// tope 0 (F3/F5). Hallazgos de la revisión de seguridad del 22 sep 2026.
+//
 
 import Atomics
 import NIOConcurrencyHelpers
@@ -583,8 +589,12 @@ extension SSHChildChannel: Channel, ChannelCore {
         self.notifyChannelInactive()
 
         // Ok, we need to notify the network that we're done.
-        if self.state.isActiveOnNetwork, !self.state.sentClose {
-            let message = SSHMessage.ChannelCloseMessage(recipientChannel: self.state.remoteChannelIdentifier!)
+        // El identificador remoto es nil mientras el canal espera CHANNEL_OPEN_CONFIRMATION
+        // (.requestedLocally): un mensaje prematuro del peer llegaba aquí y el force-unwrap
+        // abortaba el proceso (F4 de la revisión del 22 sep 2026). Sin identificador no hay
+        // CHANNEL_CLOSE que mandar.
+        if self.state.isActiveOnNetwork, !self.state.sentClose, let remoteChannelID = self.state.remoteChannelIdentifier {
+            let message = SSHMessage.ChannelCloseMessage(recipientChannel: remoteChannelID)
             self.processOutboundMessage(.channelClose(message), promise: nil)
             self.writePendingToMultiplexer()
         }
@@ -685,6 +695,11 @@ private extension SSHChildChannel {
     private func deliverPendingWrites() {
         while self.pendingWritesFromChannel.hasMark, self.writabilityManager.windowSpaceOnNetwork > 0, var write = self.pendingWritesFromChannel.first {
             let maxWriteLength = min(self.writabilityManager.windowSpaceOnNetwork, Int(self.peerMaxMessageSize))
+            // Defensa en profundidad: con tope 0, trim devolvía un prefijo vacío y el bucle no
+            // terminaba (F3/F5). El tope 0 ya se rechaza al abrir o confirmar el canal.
+            guard maxWriteLength > 0 else {
+                return
+            }
             let (actualWrite, excess) = write.0.trim(maxLength: maxWriteLength)
             write.0 = actualWrite
 
@@ -758,6 +773,14 @@ extension SSHChildChannel {
     private func handleInboundChannelOpen(_ message: SSHMessage.ChannelOpenMessage) throws {
         self.state.receiveChannelOpen(message)
 
+        // Un peer que anuncia maximumPacketSize 0 metía a deliverPendingWrites en un bucle sin
+        // fin que además crecía en memoria (F3/F5 de la revisión del 22 sep 2026). Se le
+        // contesta CHANNEL_OPEN_FAILURE, como cuando el inicializador rechaza el canal.
+        guard message.maximumPacketSize > 0 else {
+            self.initializerFailed(error: NIOSSHError.protocolViolation(protocolName: "channel", violation: "peer advertised a maximum packet size of zero"))
+            return
+        }
+
         // Window size starts at zero, so we treat this as an increment. However, we disregard whether this changed
         // the writability value, as we lie about writability until we're active anyway.
         _ = try self.writabilityManager.outboundWindowIncremented(message.initialWindowSize)
@@ -770,6 +793,12 @@ extension SSHChildChannel {
 
     private func handleInboundChannelOpenConfirmation(_ message: SSHMessage.ChannelOpenConfirmationMessage) throws {
         try self.state.receiveChannelOpenConfirmation(message)
+
+        // Mismo caso que en handleInboundChannelOpen (F3/F5): con el identificador remoto ya
+        // asignado, el error manda CHANNEL_CLOSE al peer y falla el canal.
+        guard message.maximumPacketSize > 0 else {
+            throw NIOSSHError.protocolViolation(protocolName: "channel", violation: "peer advertised a maximum packet size of zero")
+        }
 
         // Window size starts at zero, so we treat this as an increment. However, we disregard whether this changed
         // the writability value, as we lie about writability until we're active anyway.
