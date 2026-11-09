@@ -11,6 +11,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 8 de noviembre de 2026 (SuperPartnerDev/swift-nio-ssh):
+// un certificado cuya llave de firma es otro certificado se rechaza por su prefijo antes de
+// leerla; leerla primero recursaba una vez por certificado anidado y agotaba la pila (F6).
+//
 
 import Crypto
 import Dispatch
@@ -639,6 +644,16 @@ extension ByteBuffer {
                 var rawSignature = self.readSSHString()
             else {
                 return nil
+            }
+
+            // SuperPartner fork (F6, 22 Sep 2026 review): reject a certified signature key by its prefix before
+            // parsing it. Parsing it first recursed once per nested certificate, during key exchange and before
+            // authentication, and a deep enough chain exhausted the stack; the check in `Backing.init` only ran
+            // after the whole chain had been read.
+            var signatureKeyPrefixPeek = rawSignatureKey
+            if let signatureKeyPrefix = signatureKeyPrefixPeek.readSSHString(),
+               (try? NIOSSHCertifiedPublicKey.baseKeyPrefixForKeyPrefix(signatureKeyPrefix.readableBytesView)) != nil {
+                throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not be signed by certified key")
             }
 
             guard

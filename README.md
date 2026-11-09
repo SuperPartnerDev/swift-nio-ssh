@@ -16,6 +16,10 @@ Lo que cambia respecto a `d88989f`, por versión:
 
 Pruebas de cada uno en `Tests/NIOSSHTests` (`ByteBuffer+SSHTests`, `AESGCMTests`, `SSHPacketParserTests`, `SSHEncryptedTrafficTests`, `ChildChannelMultiplexerTests`), marcadas "Pruebas del fork".
 
+`0.3.7-sp.3` (8 nov 2026), F6 de la misma revisión:
+
+- `Keys And Signatures/NIOSSHCertifiedPublicKey.swift`: un certificado cuya llave de firma es otro certificado se rechaza por el prefijo de esa llave antes de leerla. Antes se leía primero, con una recursión por cada certificado anidado, durante el intercambio de claves y antes de autenticar; con 100 000 niveles el proceso moría con la pila agotada (señal 11). Prueba: `Tests/NIOSSHTests/NestedCertificateTests.swift`.
+
 Licencia Apache 2.0, la de Apple (`LICENSE.txt`). Cada archivo modificado lo dice en su cabecera, como pide el artículo 4(b) de la licencia.
 
 ---
