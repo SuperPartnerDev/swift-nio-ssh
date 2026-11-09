@@ -25,6 +25,10 @@ Pruebas de cada uno en `Tests/NIOSSHTests` (`ByteBuffer+SSHTests`, `AESGCMTests`
 - `SSHPacketParser.swift` y `Connection State Machine/States/SentVersionState.swift`: en el cliente, la versión del servidor es solo su línea `SSH-`; las líneas que el servidor manda antes (RFC 4253 §4.2) se consumen y se ignoran. Antes entraban al hash del intercambio de claves (§8) y la conexión fallaba con `invalidExchangeHashSignature`. El servidor sigue rechazando líneas previas del cliente. Como Apple #153 (`ded5e5c`). Prueba: `EndToEndTests.testClientAcceptsServerLinesBeforeVersion` y las dos de líneas previas de `SSHPacketParserTests`.
 - `Child Channels/SSHChannelMultiplexer.swift`: cada canal anuncia una ventana de 64 paquetes del tamaño máximo (8 MiB con el de 128 KiB), no de uno; el peer ya no espera un ajuste de ventana tras cada paquete. Como Apple #245 (`73d8f68`) y OpenSSH. Pruebas: las de ventana de `ChildChannelMultiplexerTests`.
 
+`0.3.7-sp.5` (9 nov 2026). **No usar `0.3.7-sp.4`**: con su ventana de 64 paquetes el servidor manda paquetes de datos llenos y el parser los rechazaba, así que una descarga de más de 128 KiB se quedaba trabada (visto en las pruebas de SP Mount en la Mac, antes de que ninguna build la usara).
+
+- `SSHPacketParser.swift`: un paquete cifrado se acepta hasta el tamaño de canal anunciado más 1024 bytes de cabeceras y relleno (RFC 4253 §6), y uno sin cifrar hasta 256 KiB, como Apple (`maximumEncryptedPacketLength` de #245 y `maximumPlaintextPacketLength` de #244). Antes el tope era el tamaño anunciado exacto y un paquete de datos con la carga máxima anunciada, que es válido, se rechazaba. Prueba: `EndToEndTests.testFullSizeChannelDataIsAccepted`; `testChannelRejectsHugePacketsRequests` (del fork de 2022, no de Apple) manda ahora 35 000 bytes, por encima del tope nuevo.
+
 Licencia Apache 2.0, la de Apple (`LICENSE.txt`). Cada archivo modificado lo dice en su cabecera, como pide el artículo 4(b) de la licencia.
 
 ---

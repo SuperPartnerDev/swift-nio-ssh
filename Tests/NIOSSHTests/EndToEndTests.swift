@@ -619,6 +619,35 @@ class EndToEndTests: XCTestCase {
         helper(ChannelFailureEvent())
     }
 
+    /// Un paquete de datos con la carga máxima que anunciamos (128 KiB) es válido: el paquete de
+    /// transporte que lo lleva es mayor por las cabeceras y el relleno (RFC 4253 §6), y el parser
+    /// debe aceptarlo con ese margen, como Apple (`maximumPacketSize + 1024`). Antes se rechazaba,
+    /// y con la ventana de 64 paquetes un servidor que manda paquetes llenos cortaba la conexión.
+    func testFullSizeChannelDataIsAccepted() throws {
+        XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))
+        XCTAssertNoThrow(try self.channel.activate())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+
+        let clientChannel = try self.channel.createNewChannel()
+        let readRecorder = ReadRecordingHandler()
+        XCTAssertNoThrow(try clientChannel.pipeline.addHandler(readRecorder).wait())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        guard let serverChannel = self.channel.activeServerChannels.first else {
+            XCTFail("Server channel not created")
+            return
+        }
+
+        let carga = ByteBuffer(repeating: 7, count: SSHPacketParser.defaultMaximumPacketSize)
+        XCTAssertNoThrow(try serverChannel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(carga))).wait())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+
+        let recibido = readRecorder.reads.reduce(0) { total, leido in
+            guard case .byteBuffer(let buffer) = leido.data else { return total }
+            return total + buffer.readableBytes
+        }
+        XCTAssertEqual(recibido, SSHPacketParser.defaultMaximumPacketSize)
+    }
+
     /// This test validates that all the channel requests roiund-trip appropriately.
     func testChannelRejectsHugePacketsRequests() throws {
         XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness(), maximumPacketSize: 32768))
@@ -636,7 +665,10 @@ class EndToEndTests: XCTestCase {
         let userEventRecorder = UserEventExpecter()
         XCTAssertNoThrow(try serverChannel.pipeline.addHandler(userEventRecorder).wait())
 
-        let hugeCommand = String(repeating: "a", count: 33000)
+        // El parser acepta hasta el tamaño anunciado más 1024 bytes de cabeceras y relleno (RFC 4253 §6,
+        // como Apple #245); antes el tope era el tamaño exacto y bastaban 33 000 bytes. 35 000 sigue
+        // por encima del tope (32 768 + 1024) y la prueba mantiene lo que valida: lo enorme se rechaza.
+        let hugeCommand = String(repeating: "a", count: 35000)
         try clientChannel.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: hugeCommand, wantReply: true)).wait()
         XCTAssertThrowsError(try self.channel.interactInMemory())
     }

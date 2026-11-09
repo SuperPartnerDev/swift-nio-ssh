@@ -16,7 +16,9 @@
 // decryptLength rechaza una longitud que desborde al sumar macBytes (F1; Apple #244) y
 // readVersion acota el identificador de versión a 255 bytes (RFC 4253 §4.2; Apple #244).
 // Modificado el 9 de noviembre de 2026: en el cliente, readVersion devuelve solo la línea de versión,
-// sin las líneas que el servidor manda antes (RFC 4253 §4.2 y §8; Apple #153).
+// sin las líneas que el servidor manda antes (RFC 4253 §4.2 y §8; Apple #153); un paquete cifrado se
+// acepta hasta el tamaño de canal anunciado más 1024 bytes (RFC 4253 §6; Apple #245) y uno sin
+// cifrar hasta 256 KiB (Apple #244).
 //
 
 import NIOCore
@@ -34,6 +36,12 @@ struct SSHPacketParser {
     private var state: State
     private var sequenceNumber: UInt32 = 0
     private let maximumPacketSize: Int
+
+    /// Tope de un paquete cifrado: el tamaño de canal anunciado más el margen de Apple (#245).
+    private var maximumEncryptedPacketLength: UInt32 { UInt32(self.maximumPacketSize) + 1024 }
+
+    /// Tope de un paquete sin cifrar (Apple #244).
+    static let maximumPlaintextPacketLength: UInt32 = 256 * 1024
     internal static let defaultMaximumPacketSize = 1 << 17
 
     /// Testing only: the number of bytes we can discard from this buffer.
@@ -91,7 +99,9 @@ struct SSHPacketParser {
             return nil
         case .cleartextWaitingForLength:
             if let length = self.buffer.getInteger(at: self.buffer.readerIndex, as: UInt32.self) {
-                if length >= self.maximumPacketSize {
+                // Sin cifrar solo viajan el intercambio de claves y la versión: tope fijo de 256 KiB,
+                // como Apple (`maximumPlaintextPacketLength`, #244).
+                if length > Self.maximumPlaintextPacketLength {
                     throw NIOSSHError.invalidEncryptedPacketLength
                 }
 
@@ -207,8 +217,11 @@ struct SSHPacketParser {
         // abortar, porque el + de Swift mataba el proceso con 0xFFFFFFF0 o más antes de llegar
         // a la comprobación de maximumPacketSize (F1 de la revisión del 22 sep 2026; el mismo
         // guard que Apple añadió en #244).
+        // El tope es el tamaño de canal que anunciamos más 1024 bytes para cabeceras y relleno
+        // (RFC 4253 §6), como Apple (`maximumEncryptedPacketLength`, #245): un paquete de datos con
+        // la carga máxima anunciada es válido y antes se rechazaba.
         let (decryptedLength, overflow) = packetLength.addingReportingOverflow(UInt32(protection.macBytes))
-        if overflow || decryptedLength >= self.maximumPacketSize {
+        if overflow || packetLength > self.maximumEncryptedPacketLength {
             throw NIOSSHError.invalidEncryptedPacketLength
         }
 
