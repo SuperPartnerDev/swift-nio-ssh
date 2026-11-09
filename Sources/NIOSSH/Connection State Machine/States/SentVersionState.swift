@@ -11,6 +11,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 9 de noviembre de 2026 (SuperPartnerDev/swift-nio-ssh): el parser
+// sabe si es servidor, para leer la versión del peer como pide su papel (Apple #153).
+//
 
 import NIOCore
 
@@ -34,7 +38,7 @@ extension SSHConnectionStateMachine {
             self.role = state.role
             self.serializer = state.serializer
 
-            self.parser = SSHPacketParser(allocator: allocator, maximumPacketSize: maximumPacketSize)
+            self.parser = SSHPacketParser(allocator: allocator, maximumPacketSize: maximumPacketSize, isServer: state.role.isServer)
             self.allocator = allocator
             self.connectionAttributes = state.connectionAttributes
         }

@@ -11,6 +11,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+//
+// Modificado por SuperPartner el 9 de noviembre de 2026 (SuperPartnerDev/swift-nio-ssh): la ventana
+// de cada canal es de 64 paquetes del tamaño máximo, no de uno (Apple #245).
+//
 
 import NIOCore
 
@@ -35,6 +39,17 @@ final class SSHChannelMultiplexer {
     private var canCreateNewChannels: Bool
 
     internal let maximumPacketSize: Int
+
+    /// La ventana de recepción que anunciamos en cada canal, en paquetes del tamaño máximo: 64, como
+    /// Apple #245 (`73d8f68`, «Matches the multiplier used by OpenSSH»).
+    internal static let windowSizePacketMultiple = 64
+
+    /// 64 paquetes, con tope en `Int32.max` (el máximo que admite la ventana); antes era un solo paquete y el
+    /// peer tenía que esperar un ajuste de ventana tras cada uno.
+    private var targetWindowSize: Int32 {
+        let (ventana, desborde) = self.maximumPacketSize.multipliedReportingOverflow(by: Self.windowSizePacketMultiple)
+        return desborde || ventana > Int(Int32.max) ? Int32.max : Int32(ventana)
+    }
 
     init(delegate: SSHMultiplexerDelegate, allocator: ByteBufferAllocator, childChannelInitializer: SSHChildChannel.Initializer?, maximumPacketSize: Int = 1 << 17) {
         self.channels = [:]
@@ -203,7 +218,7 @@ extension SSHChannelMultiplexer {
                                       multiplexer: self,
                                       initializer: initializer,
                                       localChannelID: channelID,
-                                      targetWindowSize: Int32(self.maximumPacketSize),
+                                      targetWindowSize: self.targetWindowSize,
                                       initialOutboundWindowSize: 0) // The initial outbound window size is presumed to be 0 until we're told otherwise.
 
         self.channels[channelID] = channel

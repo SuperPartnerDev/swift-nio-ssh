@@ -20,6 +20,11 @@ Pruebas de cada uno en `Tests/NIOSSHTests` (`ByteBuffer+SSHTests`, `AESGCMTests`
 
 - `Keys And Signatures/NIOSSHCertifiedPublicKey.swift`: un certificado cuya llave de firma es otro certificado se rechaza por el prefijo de esa llave antes de leerla. Antes se leía primero, con una recursión por cada certificado anidado, durante el intercambio de claves y antes de autenticar; con 100 000 niveles el proceso moría con la pila agotada (señal 11). Prueba: `Tests/NIOSSHTests/NestedCertificateTests.swift`.
 
+`0.3.7-sp.4` (9 nov 2026), comparación con Apple `0.15.1`:
+
+- `SSHPacketParser.swift` y `Connection State Machine/States/SentVersionState.swift`: en el cliente, la versión del servidor es solo su línea `SSH-`; las líneas que el servidor manda antes (RFC 4253 §4.2) se consumen y se ignoran. Antes entraban al hash del intercambio de claves (§8) y la conexión fallaba con `invalidExchangeHashSignature`. El servidor sigue rechazando líneas previas del cliente. Como Apple #153 (`ded5e5c`). Prueba: `EndToEndTests.testClientAcceptsServerLinesBeforeVersion` y las dos de líneas previas de `SSHPacketParserTests`.
+- `Child Channels/SSHChannelMultiplexer.swift`: cada canal anuncia una ventana de 64 paquetes del tamaño máximo (8 MiB con el de 128 KiB), no de uno; el peer ya no espera un ajuste de ventana tras cada paquete. Como Apple #245 (`73d8f68`) y OpenSSH. Pruebas: las de ventana de `ChildChannelMultiplexerTests`.
+
 Licencia Apache 2.0, la de Apple (`LICENSE.txt`). Cada archivo modificado lo dice en su cabecera, como pide el artículo 4(b) de la licencia.
 
 ---

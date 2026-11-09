@@ -67,7 +67,9 @@ final class SSHPacketParserTests: XCTestCase {
 
         switch try parser.nextPacket() {
         case .version(let string):
-            XCTAssertEqual(string, "xxxx\r\nyyyy\r\nSSH-2.0-OpenSSH_7.9")
+            // Solo la línea de versión: es la que entra al hash del intercambio de claves (RFC 4253 §8);
+            // las líneas previas del servidor se ignoran (§4.2). Misma expectativa que Apple #153 (`ded5e5c`).
+            XCTAssertEqual(string, "SSH-2.0-OpenSSH_7.9")
         default:
             XCTFail("Expecting .version")
         }
@@ -105,7 +107,9 @@ final class SSHPacketParserTests: XCTestCase {
 
         switch try parser.nextPacket() {
         case .version(let string):
-            XCTAssertEqual(string, "xxxx\nyyyy\nSSH-2.0-OpenSSH_7.4")
+            // Solo la línea de versión: es la que entra al hash del intercambio de claves (RFC 4253 §8);
+            // las líneas previas del servidor se ignoran (§4.2). Misma expectativa que Apple #153 (`ded5e5c`).
+            XCTAssertEqual(string, "SSH-2.0-OpenSSH_7.4")
         default:
             XCTFail("Expecting .version")
         }

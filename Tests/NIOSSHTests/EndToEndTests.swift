@@ -559,6 +559,20 @@ class EndToEndTests: XCTestCase {
         self.channel = nil
     }
 
+    /// RFC 4253 §4.2: el servidor puede mandar otras líneas antes de su versión y el cliente debe
+    /// aceptarlas. Solo la línea de versión entra al hash del intercambio de claves (§8); con las líneas
+    /// previas dentro, el hash no coincide y la conexión falla al verificar la firma del host (Apple #153).
+    func testClientAcceptsServerLinesBeforeVersion() throws {
+        XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))
+        XCTAssertNoThrow(try self.channel.activate())
+        XCTAssertNoThrow(try self.channel.client.writeInbound(ByteBuffer(string: "Bienvenido al servidor\r\nsegunda linea\r\n")))
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+
+        XCTAssertNoThrow(try self.channel.createNewChannel())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertEqual(self.channel.activeServerChannels.count, 1)
+    }
+
     /// This test validates that all the channel requests round-trip appropriately.
     func testChannelRequests() throws {
         XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))

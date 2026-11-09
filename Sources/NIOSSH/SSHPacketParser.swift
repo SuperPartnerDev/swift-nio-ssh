@@ -15,6 +15,8 @@
 // Modificado por SuperPartner el 23 de septiembre de 2026 (SuperPartnerDev/swift-nio-ssh):
 // decryptLength rechaza una longitud que desborde al sumar macBytes (F1; Apple #244) y
 // readVersion acota el identificador de versión a 255 bytes (RFC 4253 §4.2; Apple #244).
+// Modificado el 9 de noviembre de 2026: en el cliente, readVersion devuelve solo la línea de versión,
+// sin las líneas que el servidor manda antes (RFC 4253 §4.2 y §8; Apple #153).
 //
 
 import NIOCore
@@ -39,7 +41,12 @@ struct SSHPacketParser {
         self.buffer.readerIndex
     }
 
-    init(allocator: ByteBufferAllocator, maximumPacketSize: Int = defaultMaximumPacketSize) {
+    /// En el servidor, las líneas previas a la versión siguen llegando con ella y la validación del banner las
+    /// rechaza: solo el servidor puede mandarlas (RFC 4253 §4.2). Apple #153 separa los dos papeles igual.
+    private let isServer: Bool
+
+    init(allocator: ByteBufferAllocator, maximumPacketSize: Int = defaultMaximumPacketSize, isServer: Bool = false) {
+        self.isServer = isServer
         // Assert that users don't provide a packet size lower than allowed by spec
         precondition(maximumPacketSize >= 32768, "Maximum Packet Size is below minimum requirement as specified by RFC 4254")
         precondition(maximumPacketSize <= (1 << 24), "Maximum Packet Size is set abnormally high")
@@ -165,8 +172,10 @@ struct SSHPacketParser {
                     guard lineSlice.count + 1 <= Self.maximumVersionLineLength else {
                         throw NIOSSHError.excessiveVersionLength
                     }
-                    // Found SSH version line, return everything up to and including this line
-                    var version = String(decoding: slice[slice.startIndex..<index], as: UTF8.self)
+                    // En el cliente, solo la línea de versión: es la que entra al hash del intercambio de claves (RFC 4253
+                    // §8). Las líneas previas del servidor (§4.2) se consumen y se ignoran; con ellas dentro el
+                    // hash no coincidía y la conexión fallaba al verificar la firma del host. Apple #153.
+                    var version = String(decoding: self.isServer ? slice[slice.startIndex..<index] : lineSlice, as: UTF8.self)
                     // read including \n
                     self.buffer.moveReaderIndex(forwardBy: slice.startIndex.distance(to: index).advanced(by: 1))
                     // Remove the trailing \r if present (but keep \n removal logic for consistency)
